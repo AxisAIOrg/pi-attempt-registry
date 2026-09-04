@@ -1,0 +1,46 @@
+name: Stellar AttemptRegistry attest
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build-attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin Rust toolchain
+        run: rustup show
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v28.0.0
+        with:
+          version: 28.0.0
+
+      - name: Build contract with SEP-55 meta
+        run: |
+          stellar contract build \
+            --locked \
+            --package attempt-registry \
+            --meta source_repo=github:${{ github.repository }} \
+            --meta commit_sha=${{ github.sha }}
+
+      - name: Attest WASM (SEP-55)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: attempt_registry.wasm
+          subject-path: target/wasm32v1-none/release/attempt_registry.wasm
+
+      - name: Upload WASM
+        uses: actions/upload-artifact@v4
+        with:
+          name: attempt_registry.wasm
+          path: target/wasm32v1-none/release/attempt_registry.wasm
+          if-no-files-found: error
