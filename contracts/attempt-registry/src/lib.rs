@@ -346,6 +346,13 @@ impl AttemptRegistry {
         bump_instance(&env);
     }
 
+    /// Replace this contract's WASM. Live instance, storage, and C-address stay.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        require_owner(&env);
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        bump_instance(&env);
+    }
+
     pub fn verify_record(env: Env, data_id: u128) -> (bool, bool) {
         match load_record(&env, data_id) {
             Some(record) => (true, !record.invalidated),

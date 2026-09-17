@@ -325,6 +325,23 @@ fn transfer_owner_requires_auth() {
 }
 
 #[test]
+fn upgrade_requires_auth() {
+    let (env, client, _) = setup_no_auths();
+    assert!(client
+        .try_upgrade(&BytesN::from_array(&env, &[0x55u8; 32]))
+        .is_err());
+}
+
+#[test]
+fn upgrade_owner_can_replace_wasm() {
+    let (env, client, owner, _) = setup();
+    let wasm_hash = env.deployer().upload_contract_wasm([0u8; 0]);
+    client.upgrade(&wasm_hash);
+    assert_eq!(client.owner(), owner);
+    assert!(!client.paused());
+}
+
+#[test]
 fn message_includes_network_and_is_183_bytes() {
     let (env, client, _, user) = setup();
     env.ledger().set_network_id([7u8; 32]);
