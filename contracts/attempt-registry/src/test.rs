@@ -6,9 +6,8 @@ use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, BytesN, Env, Vec};
 
 const SERVER_SK: [u8; 32] = [
-    0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-    0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-    0x11, 0x11,
+    0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+    0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
 ];
 const DATA_ID: u128 = 40006;
 const TASK_ID: u128 = 22;
@@ -30,6 +29,7 @@ fn setup() -> (Env, AttemptRegistryClient<'static>, Address, Address) {
     (env, client, owner, user)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sign_submit(
     env: &Env,
     client: &AttemptRegistryClient<'_>,
@@ -51,7 +51,9 @@ fn sign_submit(
 #[test]
 fn submit_record_success() {
     let (env, client, _, user) = setup();
-    let sig = sign_submit(&env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let sig = sign_submit(
+        &env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
 
     client.submit_record(&user, &DATA_ID, &TASK_ID, &SCORE, &SIM_TIME, &sig);
 
@@ -73,23 +75,37 @@ fn submit_record_success() {
 #[test]
 fn submit_record_user_list() {
     let (env, client, _, user) = setup();
-    let sig1 = sign_submit(&env, &client, &SERVER_SK, &user, 1, TASK_ID, SCORE, SIM_TIME);
-    let sig2 = sign_submit(&env, &client, &SERVER_SK, &user, 2, TASK_ID, SCORE, SIM_TIME);
+    let sig1 = sign_submit(
+        &env, &client, &SERVER_SK, &user, 1, TASK_ID, SCORE, SIM_TIME,
+    );
+    let sig2 = sign_submit(
+        &env, &client, &SERVER_SK, &user, 2, TASK_ID, SCORE, SIM_TIME,
+    );
     client.submit_record(&user, &1, &TASK_ID, &SCORE, &SIM_TIME, &sig1);
     client.submit_record(&user, &2, &TASK_ID, &SCORE, &SIM_TIME, &sig2);
 
-    let ids = client.get_user_records(&user);
+    let ids = client.get_user_records(&user, &0, &50);
     assert_eq!(ids.len(), 2);
     assert_eq!(ids.get(0).unwrap(), 1);
     assert_eq!(ids.get(1).unwrap(), 2);
     assert_eq!(client.get_user_record_count(&user), 2);
+
+    let page = client.get_user_records(&user, &1, &1);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.get(0).unwrap(), 2);
+    let empty = client.get_user_records(&user, &2, &50);
+    assert_eq!(empty.len(), 0);
+    let capped = client.get_user_records(&user, &0, &100);
+    assert_eq!(capped.len(), 2);
 }
 
 #[test]
 #[should_panic(expected = "Error(Contract, #1)")]
 fn submit_record_duplicate() {
     let (env, client, _, user) = setup();
-    let sig = sign_submit(&env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let sig = sign_submit(
+        &env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
     client.submit_record(&user, &DATA_ID, &TASK_ID, &SCORE, &SIM_TIME, &sig);
     client.submit_record(&user, &DATA_ID, &TASK_ID, &SCORE, &SIM_TIME, &sig);
 }
@@ -99,7 +115,9 @@ fn submit_record_duplicate() {
 fn submit_record_fake_signature() {
     let (env, client, _, user) = setup();
     let fake_sk = [0x22u8; 32];
-    let sig = sign_submit(&env, &client, &fake_sk, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let sig = sign_submit(
+        &env, &client, &fake_sk, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
     client.submit_record(&user, &DATA_ID, &TASK_ID, &SCORE, &SIM_TIME, &sig);
 }
 
@@ -108,7 +126,9 @@ fn submit_record_fake_signature() {
 fn submit_record_wrong_user() {
     let (env, client, _, user) = setup();
     let other = Address::generate(&env);
-    let sig = sign_submit(&env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let sig = sign_submit(
+        &env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
     client.submit_record(&other, &DATA_ID, &TASK_ID, &SCORE, &SIM_TIME, &sig);
 }
 
@@ -116,7 +136,9 @@ fn submit_record_wrong_user() {
 #[should_panic]
 fn submit_record_tampered_score() {
     let (env, client, _, user) = setup();
-    let sig = sign_submit(&env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let sig = sign_submit(
+        &env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
     client.submit_record(&user, &DATA_ID, &TASK_ID, &(SCORE + 1), &SIM_TIME, &sig);
 }
 
@@ -125,7 +147,9 @@ fn submit_record_tampered_score() {
 fn submit_record_when_paused() {
     let (env, client, _, user) = setup();
     client.pause();
-    let sig = sign_submit(&env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let sig = sign_submit(
+        &env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
     client.submit_record(&user, &DATA_ID, &TASK_ID, &SCORE, &SIM_TIME, &sig);
 }
 
@@ -134,7 +158,9 @@ fn submit_record_after_unpause() {
     let (env, client, _, user) = setup();
     client.pause();
     client.unpause();
-    let sig = sign_submit(&env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let sig = sign_submit(
+        &env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
     client.submit_record(&user, &DATA_ID, &TASK_ID, &SCORE, &SIM_TIME, &sig);
     assert!(client.record_exists(&DATA_ID));
 }
@@ -142,7 +168,9 @@ fn submit_record_after_unpause() {
 #[test]
 fn invalidate_record_success() {
     let (env, client, _, user) = setup();
-    let sig = sign_submit(&env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let sig = sign_submit(
+        &env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
     client.submit_record(&user, &DATA_ID, &TASK_ID, &SCORE, &SIM_TIME, &sig);
     client.invalidate_record(&DATA_ID);
 
@@ -163,7 +191,9 @@ fn invalidate_record_not_found() {
 fn batch_invalidate_success() {
     let (env, client, _, user) = setup();
     for id in [1u128, 2, 3] {
-        let sig = sign_submit(&env, &client, &SERVER_SK, &user, id, TASK_ID, SCORE, SIM_TIME);
+        let sig = sign_submit(
+            &env, &client, &SERVER_SK, &user, id, TASK_ID, SCORE, SIM_TIME,
+        );
         client.submit_record(&user, &id, &TASK_ID, &SCORE, &SIM_TIME, &sig);
     }
     let ids = Vec::from_array(&env, [1u128, 2, 3]);
@@ -191,27 +221,25 @@ fn verify_record_not_found() {
 #[test]
 fn set_server_signer_and_old_sig_fails() {
     let (env, client, _, user) = setup();
-    let old_sig = sign_submit(&env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
 
     let new_sk = [0x33u8; 32];
     let new_pk = SigningKey::from_bytes(&new_sk).verifying_key();
     client.set_server_signer(&BytesN::from_array(&env, &new_pk.to_bytes()));
 
-    let new_sig = sign_submit(&env, &client, &new_sk, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let new_sig = sign_submit(
+        &env, &client, &new_sk, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
     client.submit_record(&user, &DATA_ID, &TASK_ID, &SCORE, &SIM_TIME, &new_sig);
     assert!(client.record_exists(&DATA_ID));
-
-    let other_user = Address::generate(&env);
-    let leftover = old_sig;
-    let _ = leftover;
-    let _ = other_user;
 }
 
 #[test]
 #[should_panic]
 fn old_signature_rejected_after_rotation() {
     let (env, client, _, user) = setup();
-    let old_sig = sign_submit(&env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME);
+    let old_sig = sign_submit(
+        &env, &client, &SERVER_SK, &user, DATA_ID, TASK_ID, SCORE, SIM_TIME,
+    );
     let new_sk = [0x33u8; 32];
     let new_pk = SigningKey::from_bytes(&new_sk).verifying_key();
     client.set_server_signer(&BytesN::from_array(&env, &new_pk.to_bytes()));
@@ -234,10 +262,66 @@ fn constructor_sets_owner_and_signer() {
 
 #[test]
 fn transfer_owner() {
-    let (env, client, _, _) = setup();
+    let (env, client, owner, _) = setup();
     let next = Address::generate(&env);
     client.transfer_owner(&next);
     assert_eq!(client.owner(), next);
+    assert_ne!(client.owner(), owner);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn transfer_owner_same_address() {
+    let (_, client, owner, _) = setup();
+    client.transfer_owner(&owner);
+}
+
+fn setup_no_auths() -> (Env, AttemptRegistryClient<'static>, Address) {
+    let env = Env::default();
+    let owner = Address::generate(&env);
+    let contract_id = env.register(AttemptRegistry, (owner.clone(), server_pk(&env)));
+    let client = AttemptRegistryClient::new(&env, &contract_id);
+    (env, client, owner)
+}
+
+#[test]
+fn pause_requires_auth() {
+    let (_, client, _) = setup_no_auths();
+    assert!(client.try_pause().is_err());
+}
+
+#[test]
+fn unpause_requires_auth() {
+    let (_, client, _) = setup_no_auths();
+    assert!(client.try_unpause().is_err());
+}
+
+#[test]
+fn invalidate_requires_auth() {
+    let (_, client, _) = setup_no_auths();
+    assert!(client.try_invalidate_record(&DATA_ID).is_err());
+}
+
+#[test]
+fn batch_invalidate_requires_auth() {
+    let (env, client, _) = setup_no_auths();
+    let ids = Vec::from_array(&env, [DATA_ID]);
+    assert!(client.try_batch_invalidate(&ids).is_err());
+}
+
+#[test]
+fn set_server_signer_requires_auth() {
+    let (env, client, _) = setup_no_auths();
+    assert!(client
+        .try_set_server_signer(&BytesN::from_array(&env, &[0x44u8; 32]))
+        .is_err());
+}
+
+#[test]
+fn transfer_owner_requires_auth() {
+    let (env, client, _) = setup_no_auths();
+    let next = Address::generate(&env);
+    assert!(client.try_transfer_owner(&next).is_err());
 }
 
 #[test]

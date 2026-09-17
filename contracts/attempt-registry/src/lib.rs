@@ -22,10 +22,8 @@ use soroban_sdk::{
 
 const DOMAIN: &[u8] = b"AXIS_STELLAR_ATTEMPT_V1";
 
-const INSTANCE_TTL_THRESHOLD: u32 = 100;
-const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
-const PERSISTENT_TTL_THRESHOLD: u32 = 100;
-const PERSISTENT_TTL_EXTEND_TO: u32 = 518_400;
+/// Hard cap so `get_user_records` cannot walk an unbounded user index.
+const USER_RECORDS_PAGE_MAX: u32 = 50;
 
 #[contract]
 pub struct AttemptRegistry;
@@ -40,6 +38,7 @@ pub enum Error {
     EmptyBatch = 4,
     Paused = 5,
     InvalidAddress = 6,
+    SameOwner = 7,
 }
 
 #[contracttype]
@@ -87,18 +86,24 @@ pub struct ServerSignerUpdated {
     pub new_signer: BytesN<32>,
 }
 
+#[contractevent(topics = ["owner_set"])]
+pub struct OwnerTransferred {
+    pub old_owner: Address,
+    pub new_owner: Address,
+}
+
+fn ttl_window(env: &Env) -> u32 {
+    env.storage().max_ttl()
+}
+
 fn bump_instance(env: &Env) {
-    env.storage()
-        .instance()
-        .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+    let ttl = ttl_window(env);
+    env.storage().instance().extend_ttl(ttl, ttl);
 }
 
 fn bump_persistent(env: &Env, key: &DataKey) {
-    env.storage().persistent().extend_ttl(
-        key,
-        PERSISTENT_TTL_THRESHOLD,
-        PERSISTENT_TTL_EXTEND_TO,
-    );
+    let ttl = ttl_window(env);
+    env.storage().persistent().extend_ttl(key, ttl, ttl);
 }
 
 fn require_owner(env: &Env) -> Address {
@@ -144,7 +149,11 @@ pub fn build_submit_message(
 ) -> Bytes {
     let mut msg = Bytes::from_slice(env, DOMAIN);
     append_id32(env, &mut msg, &env.ledger().network_id());
-    append_id32(env, &mut msg, &address_id32(env, &env.current_contract_address()));
+    append_id32(
+        env,
+        &mut msg,
+        &address_id32(env, &env.current_contract_address()),
+    );
     append_u128(&mut msg, data_id);
     append_u128(&mut msg, task_id);
     append_id32(env, &mut msg, &address_id32(env, user));
@@ -223,7 +232,11 @@ impl AttemptRegistry {
             panic_with_error!(&env, Error::RecordAlreadyExists);
         }
 
-        let server_signer: BytesN<32> = env.storage().instance().get(&DataKey::ServerSigner).unwrap();
+        let server_signer: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ServerSigner)
+            .unwrap();
         let message = build_submit_message(&env, &user, data_id, task_id, score, simulation_time);
         env.crypto()
             .ed25519_verify(&server_signer, &message, &server_signature);
@@ -248,7 +261,11 @@ impl AttemptRegistry {
         bump_persistent(&env, &at_key);
         bump_persistent(&env, &count_key);
 
-        let total: u128 = env.storage().instance().get(&DataKey::TotalRecords).unwrap();
+        let total: u128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalRecords)
+            .unwrap();
         env.storage()
             .instance()
             .set(&DataKey::TotalRecords, &(total + 1));
@@ -286,7 +303,11 @@ impl AttemptRegistry {
         if new_signer == BytesN::from_array(&env, &[0u8; 32]) {
             panic_with_error!(&env, Error::InvalidSigner);
         }
-        let old_signer: BytesN<32> = env.storage().instance().get(&DataKey::ServerSigner).unwrap();
+        let old_signer: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ServerSigner)
+            .unwrap();
         env.storage()
             .instance()
             .set(&DataKey::ServerSigner, &new_signer);
@@ -299,9 +320,18 @@ impl AttemptRegistry {
     }
 
     pub fn transfer_owner(env: Env, new_owner: Address) {
-        require_owner(&env);
+        let old_owner = require_owner(&env);
+        if new_owner == old_owner {
+            panic_with_error!(&env, Error::SameOwner);
+        }
+        new_owner.require_auth();
         env.storage().instance().set(&DataKey::Owner, &new_owner);
         bump_instance(&env);
+        OwnerTransferred {
+            old_owner,
+            new_owner,
+        }
+        .publish(&env);
     }
 
     pub fn pause(env: Env) {
@@ -324,21 +354,21 @@ impl AttemptRegistry {
     }
 
     pub fn get_record(env: Env, data_id: u128) -> DataRecord {
-        load_record(&env, data_id)
-            .unwrap_or_else(|| panic_with_error!(&env, Error::RecordNotFound))
+        load_record(&env, data_id).unwrap_or_else(|| panic_with_error!(&env, Error::RecordNotFound))
     }
 
-    pub fn get_user_records(env: Env, user: Address) -> Vec<u128> {
+    pub fn get_user_records(env: Env, user: Address, offset: u32, limit: u32) -> Vec<u128> {
         let count_key = DataKey::UserCount(user.clone());
         let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
-        if count > 0 {
-            bump_persistent(&env, &count_key);
-        }
+        let take = limit.min(USER_RECORDS_PAGE_MAX);
         let mut ids = Vec::new(&env);
-        for i in 0..count {
+        if offset >= count || take == 0 {
+            return ids;
+        }
+        let end = count.min(offset.saturating_add(take));
+        for i in offset..end {
             let at_key = DataKey::UserAt(user.clone(), i);
             let id: u128 = env.storage().persistent().get(&at_key).unwrap();
-            bump_persistent(&env, &at_key);
             ids.push_back(id);
         }
         ids
@@ -363,7 +393,10 @@ impl AttemptRegistry {
     }
 
     pub fn server_signer(env: Env) -> BytesN<32> {
-        env.storage().instance().get(&DataKey::ServerSigner).unwrap()
+        env.storage()
+            .instance()
+            .get(&DataKey::ServerSigner)
+            .unwrap()
     }
 
     pub fn owner(env: Env) -> Address {
